@@ -5,7 +5,7 @@
 
 # Import statements
 
-# In[2]:
+# In[8]:
 
 
 import os
@@ -22,7 +22,7 @@ import plotly.express as px
 
 # Open up labjack
 
-# In[ ]:
+# In[48]:
 
 
 # open first found LabJack and call it handle
@@ -44,7 +44,7 @@ print("Opened a LabJack with Device type: %i, Connection type: %i,\n"
 # * analog input channels
 # * sample rate with user input
 
-# In[3]:
+# In[67]:
 
 
 # bias config
@@ -58,7 +58,7 @@ except Exception:
 r_constant = 1e8
 
 # gain, set by preamp board
-gain = 160*0.4
+gain = 160
 
 # current, in Amps
 I = bias / r_constant
@@ -140,7 +140,7 @@ for i in range(len(setup_names)):
 
 # Collect and save data
 
-# In[54]:
+# In[50]:
 
 
 print("Note: Stream data is transferred as 16-bit values")
@@ -164,30 +164,22 @@ try:
     # start timer
     start = datetime.now()
     total_scans = 0
-    total_skipped_samples = 0 # Total skipped samples
+#     total_skipped_samples = 0 # Total skipped samples
 
     i = 1
     while i <= scan_amount:
         v_measured = ljm.eStreamRead(handle)[0]
         time = datetime.now().strftime("%Y/%m/%d, %H:%M:%S")
-        
-        for i in range(len(channel_names)):
-            dictionary[channel_names[i]]["V [V]"].append(v_measured[i])
-            dictionary[channel_names[i]]["Time"].append(time[i])
+                
+        for k in range(len(channel_names)):
+            dictionary[channel_names[k]]["V [V]"].append(v_measured[k::len(channel_names)])
+            dictionary[channel_names[k]]["Time"].append(time)
 
         scans = len(v_measured)/len(channel_names)
         total_scans += scans
         
-        # Count the skipped samples which are indicated by -9999 values. Missed
-        # samples occur after a device's stream buffer overflows and are
-        # reported after auto-recover mode ends.
-        total_skipped_samples += data.count(-9999.0)
-        
         print("\neStreamRead %i" % i)
-        ain_string = ""
-        for j in range(0, numAddresses):
-            ain_string += "%s = %0.5f " % (channel_names[j], v_measured[j])
-        print("  1st scan out of %i: %s" % (scans, ain_string))
+
         i += 1
     
     end = datetime.now()
@@ -197,7 +189,7 @@ try:
     print("Time taken = %f seconds" % (time_taken))
     print("Timed scan rate = %f scans/second" % (total_scans/time_taken))
     print("Timed sample rate = %f samples/second" % ((total_scans*len(channel_names))/time_taken))
-    print("Skipped samples = %0.0f" % (total_skipped_samples/len(channel_names)))
+#     print("Skipped samples = %0.0f" % (total_skipped_samples/len(channel_names)))
 except ljm.LJMError:
     ljme = sys.exc_info()[1]
     print(ljme)
@@ -216,19 +208,18 @@ ljm.close(handle)
 
 # Save raw and averaged data to files
 
-# In[ ]:
+# In[51]:
+
+
+calibration = 2*(.00249/1000)
+
+
+# In[52]:
 
 
 for n in channel_names:
-    j = 0
-    r_var = []
-    for i in range(int(scan_rate)):
-        r_var.append(((dictionary[n]['V [V]'][i] / 0.3535) / gain) / I)
-        dictionary[n]["R [komhs]"][i].append(r_var[i])
-        temp = 1000*np.interp(dictionary[n]["R [komhs]"][i],res_list,temp_list)
-        dictionary[n]["Temp [mK]"][i].append(temp)
-        j+=1
-        if j == int(scan_rate): j = 0
+    dictionary[n]["R [komhs]"] = ((np.array(dictionary[n]['V [V]']) / calibration))
+    dictionary[n]["Temp [mK]"] = 1000*np.interp(dictionary[n]["R [komhs]"],res_list,temp_list)
 
 # csv data files
 if os.path.exists('data/%s_data' %(datetime.now().strftime("%Y-%m-%d"))) == False:
@@ -239,9 +230,19 @@ for i in range(len(channel_names)):
     files.append('data/%s_data' %(datetime.now().strftime("%Y-%m-%d")) + "/thermometer_%s" %channel_names[i])
 
 for n in files:
-    df = pd.DataFrame(dictionary[n[33:]])
+    df = pd.DataFrame(dictionary)#[n[33:]]
     df.to_csv(n, index = False)
-    
+
+
+# In[53]:
+
+
+df
+
+
+# In[54]:
+
+
 # averaged data
 averaged_dictionary = {}
 for n in channel_names:
@@ -249,12 +250,12 @@ for n in channel_names:
 
 for n in channel_names:
     i = 0
-    while i < len(dictionary[n]['V [V]']):
-        averaged_dictionary[n]['V [V]'].append(sum(dictionary[n]['V [V]'][i:sample_rate])/sample_rate)
-        averaged_dictionary[n]['R [komhs]'].append(sum(dictionary[n]['R [komhs]'][i:sample_rate])/sample_rate)
-        averaged_dictionary[n]['Temp [mK]'].append(sum(dictionary[n]['Temp [mK]'][i:sample_rate])/sample_rate)
-        averaged_dictionary[n]['Time'].append(dictionary[n]['Time'][0])
-        i += sample_rate
+    while i < scan_amount:
+        averaged_dictionary[n]['V [V]'].append(np.average(df[n]['V [V]'][i]))
+        averaged_dictionary[n]['R [komhs]'].append(np.average(df[n]['R [komhs]'][i]))
+        averaged_dictionary[n]['Temp [mK]'].append(np.average(df[n]['Temp [mK]'][i]))
+        averaged_dictionary[n]['Time'].append(df[n]['Time'][i])
+        i += 1
         
 # averaged csv data files
 if os.path.exists('averaged_data/averaged_%s_data' %(datetime.now().strftime("%Y-%m-%d"))) == False:
@@ -265,7 +266,7 @@ for i in range(len(channel_names)):
     files.append('averaged_data/averaged_%s_data' %(datetime.now().strftime("%Y-%m-%d")) + "/thermometer_%s" %channel_names[i])
 
 for n in files:
-    df = pd.DataFrame(averaged_dictionary[n[33:]])
+    df = pd.DataFrame(averaged_dictionary)
     df.to_csv(n, index = False)
 
 
@@ -273,16 +274,35 @@ for n in files:
 
 # Read data from file and plot
 
-# In[ ]:
+# In[55]:
 
 
-df = pd.read_csv(files[0])
-df.head()
+fig_V = px.line(x = averaged_dictionary['AIN56']['Time'], y = averaged_dictionary['AIN56']['V [V]'], title='Voltage [V] over time')
+fig_V.show()
 
 
-# In[ ]:
+# In[56]:
 
 
-figK = px.line(df, x = 'Time', y = 'Temp [K]', title='Temperature [K] over time')
-figK.show()
+fig_R = px.line(x = averaged_dictionary['AIN56']['Time'], y = averaged_dictionary['AIN56']['R [komhs]'], title='Resistance [komhs] over time')
+fig_R.show()
+
+
+# In[66]:
+
+
+print(str(((20.7687 - 20.7241) / (2*np.sqrt(2)))*1000) + ' omhs RMS')
+
+
+# In[58]:
+
+
+fig_T = px.line(x = averaged_dictionary['AIN56']['Time'], y = averaged_dictionary['AIN56']['Temp [mK]'], title='Temperature [mK] over time')
+fig_T.show()
+
+
+# In[64]:
+
+
+print(str((95.37 - 95.22 ) / (2*np.sqrt(2))) + ' mK RMS')
 
